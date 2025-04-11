@@ -21,7 +21,6 @@ os.environ['OPENAI_API_KEY']
 
 from crewai_tools import DirectoryReadTool
 from crewai_tools import FileReadTool
-from crewai_tools import EXASearchTool
 from crewai_tools import CodeDocsSearchTool
 from exa_py import Exa
 from crewai.tools import tool
@@ -63,14 +62,15 @@ exa_tool=search_and_get_contents_tool
 #LLMS
 #Testing all LLM combinations
 from crewai import LLM
-llm_gemma_1=LLM(model="groq/gemma2-9b-it",temperature=0) #chaitany_api_key
-llm_gemma_2=LLM(model="groq/gemma2-9b-it",temperature=0) #hardik_api_key
+llm_gemma_1=LLM(model="groq/gemma2-9b-it",api_key=,temperature=0) #chaitany_api_key
+llm_gemma_2=LLM(model="groq/gemma2-9b-it",api_key=, temperature=0) #hardik_api_key
 llm_openai_4o=LLM(model="openai/gpt-4o-mini",temperature=0)
 llm_openai_o3=LLM(model="openai/o1-mini-2024-09-12", temperature=0)
 
 """Gemini 2.5 pro exp"""
 
-llm_gemini=LLM(model='gemini/gemini-2.5-pro-exp-03-25')
+llm_gemini=LLM(model='gemini/gemini-2.5-pro-exp-03-25',api_key=)
+#add gemini 2 
 
 from crewai import Agent, Task, Crew, Process
 
@@ -203,7 +203,6 @@ test_case_generator=Agent(
         llm=llm_gemini,
         tools=[exa_tool, docs_search_tool],
         function_calling_llm=llm_gemma_2,
-        human_input=True,
         memory=True,
         verbose=True,
 )
@@ -270,15 +269,48 @@ A complete and organized set of Jest test files that includes:
 8. **Path to Follow (Module Hierarchy)**:
    🔽 Begin writing test cases in the following strict hierarchical order:
 
-   /db/models          → Write unit tests for all DB models
-   /services           → Write tests for service functions (unit + integration)
-   /controller         → Write controller tests (mock services and DB)
-   /middleware         → Write middleware logic tests
-   /routes             → Write route-level integration tests
+   /db/models          → Write unit tests for all DB models  
+   /services           → Write tests for service functions (unit + integration)  
+   /controller         → Write controller tests (mock services and DB)  
+   /middleware         → Write middleware logic tests  
+   /routes             → Write route-level integration tests  
 
    - For each folder/unit, generate a corresponding `*.test.js` file.
    - Maintain folder structure and clearly label each test file.
    - Use mocks for lower-level dependencies when testing higher-level modules.
+
+9. **Sequelize Mocking (Mandatory)**:
+   - All Sequelize-based DB models must be mocked to avoid real DB interaction.
+   - Use one of the following strategies:
+
+     **a. Using `sequelize-mock`** (Recommended for model-level unit testing):
+     ```js
+     const SequelizeMock = require('sequelize-mock');
+     const DBMock = new SequelizeMock();
+
+     const UserMock = DBMock.define('User', {
+       id: 1,
+       name: 'Test User'
+     });
+
+     test('should fetch user', async () => {
+       const user = await UserMock.findOne({ where: { id: 1 } });
+       expect(user.get('name')).toBe('Test User');
+     });
+     ```
+
+     **b. Using `jest.mock()` for existing model files**:
+     ```js
+     jest.mock('../../db/models/User', () => {
+       return {
+         findOne: jest.fn().mockResolvedValue({ id: 1, name: 'Mocked User' }),
+         create: jest.fn().mockResolvedValue({ id: 2, name: 'Created User' })
+       };
+     });
+     ```
+
+   - Mock all standard Sequelize methods: `findOne`, `findAll`, `create`, `update`, `destroy`, etc.
+   - Ensure these mocks are used consistently in service and controller layer tests.
 
 🎯 Final Output:
 A complete Jest test suite, with a dedicated test file for each code unit/module, organized by hierarchy, containing full coverage tests (unit + integration) ready for CI/CD pipelines.
@@ -307,33 +339,42 @@ jest_config_agent = Agent(
 
 # --- Task for Jest Configuration ---
 jest_config_task = Task(
-    description="Generate a `jest.config.js` for a modern Node.js backend project using ES Modules and JavaScript.",
+    description=(
+        "Generate a fully compatible and optimized `jest.config.js` for a modern Node.js backend project using JavaScript ES Modules. "
+        "The project structure includes `src/`, optional subfolders like `controller/`, `services/`, and colocated `__tests__` directories. "
+        "The configuration must match the test structure and transform logic required to run the Jest test files produced in the test case generation step."
+    ),
     expected_output=(
         "A valid and complete `jest.config.js` file that includes:\n"
         "- `testEnvironment: 'node'`\n"
         "- `transform` using `@swc/jest` with:\n"
         "   - Parser: `ecmascript`, no JSX\n"
         "   - Target: `es2020`\n"
-        "   - Module: ESM (`type: 'es6'`)\n"
-        "   - Source maps enabled via `sourceMaps: 'inline'`\n"
-        "- `testMatch` set to match files in `__tests__` with `.test.js` extension\n"
-        "- `moduleFileExtensions`: ['js', 'mjs', 'cjs', 'json', 'node']\n"
-        "- `moduleDirectories`: ['node_modules', '<rootDir>/src']\n"
-        "- `roots`: ['<rootDir>/src']\n"
-        "- `collectCoverage: true` for all relevant files\n"
-        "- `coverageDirectory`: 'coverage'\n"
-        "- `clearMocks: true`\n"
-        "- `maxWorkers: 1`\n"
-        "- Do NOT include deprecated or unnecessary fields like `extensionsToTreatAsEsm`\n"
-        "- Assumes `type: module` is set in package.json for ESM compatibility\n"
-        "- Test files are expected to be colocated or in `__tests__` directories"
+        "   - Module output set to ESM (`type: 'es6'`)\n"
+        "   - Source maps enabled with `sourceMaps: 'inline'`\n"
+        "- `testMatch` targeting `.test.js` files in `__tests__/` subfolders based on the segmented test structure\n"
+        "- `moduleFileExtensions` including: ['js', 'mjs', 'cjs', 'json', 'node']\n"
+        "- `moduleDirectories` set to ['node_modules', '<rootDir>/src'] based on source structure\n"
+        "- `roots` pointing to the source root folder(s) (e.g., `<rootDir>/src`)\n"
+        "- `collectCoverage: true` to collect test coverage on application code\n"
+        "- `coverageDirectory` set to 'coverage'\n"
+        "- `clearMocks: true` to reset all mocks automatically before each test\n"
+        "- `maxWorkers: 1` to serialize test execution (safe for shared state)\n"
+        "- Must exclude deprecated fields such as `extensionsToTreatAsEsm`\n"
+        "- Must assume that `package.json` includes `type: module`\n"
+        "- Ensure compatibility with test files generated using dynamic import syntax and `jest.unstable_mockModule`\n"
+        "- The config must be able to run all tests generated from the segmented code structure and `jest_test_cases`"
     ),
     agent=jest_config_agent,
     context=[
+        directory_listing_task,
+        file_extraction_task,
+        code_segmentation_task,
         test_case_generation_task
     ],
     output_file="jest.config.js"
 )
+
 
 # --- Agent for Package.json Generation ---
 package_json_agent = Agent(
@@ -350,41 +391,308 @@ package_json_agent = Agent(
 
 # --- Task for Package.json Generation ---
 package_json_task = Task(
-    description="Generate a `package.json` file for a Node.js backend project using modern JavaScript and Jest for testing.",
+    description=(
+        "Generate a complete `package.json` file for a backend Node.js project written using modern JavaScript and ES Modules. "
+        "The project uses Jest for testing, `@swc/jest` for transformation, and includes a file structure with folders like `src/`, `controller/`, `services/`, and `__tests__/`. "
+        "The generated file should fully support test execution, development, documentation, and mock infrastructure as identified from the extracted source code and Jest configuration."
+    ),
     expected_output=(
-        "A valid `package.json` file that includes:\n"
-        "- `name`, `version`, `type: module`, and `main`\n"
+        "A valid and complete `package.json` file that includes:\n"
+        "- Basic metadata:\n"
+        "   - `name`: the project name (fallback to generic if unknown)\n"
+        "   - `version`: '1.0.0'\n"
+        "   - `type`: 'module' (to support ES Modules syntax)\n"
+        "   - `main`: set to the main application entry point (e.g., `src/server.js` or auto-detect from extracted code)\n"
+        "\n"
         "- Scripts:\n"
-        "   - `test`: `jest --coverage`\n"
-        "   - `dev`: runs with `nodemon`\n"
-        "   - `docs`: runs `jsdoc` for documentation (optional)\n"
-        "- `devDependencies` should include:\n"
-        "   - `jest`\n"
-        "   - `@swc/jest` (used as transformer in `jest.config.js`)\n"
-        "   - `node-mocks-http` for mocking Node.js HTTP requests/responses\n"
-        "   - `nodemon` for development (optional)\n"
-        "   - `jsdoc` for documentation (optional)\n"
-        "- Ensure compatibility with `jest.config.js` generated above\n"
-        "- Do NOT include unnecessary libraries like React, frontend frameworks, or TypeScript\n"
-        "- Output must be valid JSON (no comments or trailing commas)\n"
-        "- The project uses ES Modules (`type: module`) and source files are structured in `src/`, `controller/`, and `__tests__/` folders"
+        "   - `test`: run Jest with coverage collection (`jest --coverage`)\n"
+        "   - `dev`: run the main app file with `nodemon`\n"
+        "   - `docs`: optionally generate documentation using JSDoc (`jsdoc -c jsdoc.json`)\n"
+        "\n"
+        "- `devDependencies` must include:\n"
+        "   - `jest` (version inferred from `jest.config.js` or latest v29+)\n"
+        "   - `@swc/jest` for transforming JS/ESM\n"
+        "   - `node-mocks-http` for request/response testing\n"
+        "   - `sequelize-mock` if Sequelize usage is found in `extracted_code`\n"
+        "   - `nodemon` (if `dev` script is present)\n"
+        "   - `jsdoc` (if `docs` script is present)\n"
+        "\n"
+        "- The file should:\n"
+        "   - Match `jest.config.js` assumptions (e.g., type: module, test runner)\n"
+        "   - Reflect only backend dependencies — no React, TypeScript, Webpack, Babel, or frontend frameworks\n"
+        "   - Avoid redundant or unnecessary packages\n"
+        "   - Output valid JSON (no comments, no trailing commas)\n"
+        "\n"
+        "- The structure of the project (as inferred from context) includes `src/`, `controller/`, `services/`, and `__tests__/`, and tests rely on mocking and dynamic import syntax (`await import(...)`, `jest.unstable_mockModule()`)\n"
+        "- Ensure compatibility with ESM runtime and Node >= 16\n"
     ),
     agent=package_json_agent,
     context=[
-        directory_listing_task,
         file_extraction_task,
+        code_segmentation_task,
         jest_config_task
     ],
     output_file="package.json"
 )
 
 
-#Testing the Agents
 
-testing_crew=Crew(
-    agents=[directory_listing_agent,file_extraction_agent,code_segmentation_agent, test_case_generator,jest_config_agent,package_json_agent],
-    tasks=[directory_listing_task,file_extraction_task,code_segmentation_task, test_case_generation_task,jest_config_task,package_json_task],
-    manager_llm=llm_openai_o3,
+
+
+#The Corrections Crew
+test_case_correction_agent = Agent(
+    role="Automated Test Case Reviewer and Corrector",
+    goal="Analyze, validate, and correct Jest test cases for structural correctness, runtime compatibility, ESM support, and mock consistency to ensure all test files are CI-ready and error-free.",
+    backstory=(
+        "You are a highly skilled test reviewer with deep expertise in Jest, ES Modules, asynchronous JavaScript, and mocking frameworks. "
+        "Your job is to inspect automatically generated test cases, identify and fix any runtime, import, mocking, or syntax issues. "
+        "You ensure each test is fully compatible with ESM (import/export), mocks Sequelize and services correctly, and follows Jest best practices. "
+        "Your corrections are critical for maintaining CI/CD reliability and 100% automation in the testing pipeline."
+    ),
+    llm=llm_gemini,
+    memory=True,
+    verbose=True
+)
+
+test_case_correction_task = Task(
+    description=(
+        "Review and correct all Jest test cases generated from the segmented JavaScript code to ensure they are syntactically valid, fully functional, and compatible with the ES Module-based Node.js backend architecture. "
+        "The test cases should follow best practices, support Sequelize mocking, and be compatible with dynamic `await import()` syntax and `jest.unstable_mockModule`. "
+        "Ensure each test runs successfully in CI/CD pipelines without any manual changes."
+    ),
+    expected_output=(
+        "A fully corrected and validated Jest test suite that meets the following requirements:\n\n"
+        "1. **Syntax & Runtime Compatibility**:\n"
+        "   - All test files use proper ESM syntax (`import`, `export`) and no CommonJS (`require()` or `module.exports`)\n"
+        "   - Dynamic imports (`await import(...)`) and `jest.unstable_mockModule()` are correctly used where necessary\n"
+        "   - Async tests use `async/await` correctly and all Promises are handled\n\n"
+        "2. **Mocking Validation**:\n"
+        "   - External dependencies are mocked using `jest.mock()` or `jest.unstable_mockModule()`\n"
+        "   - Sequelize models must be mocked using `sequelize-mock` or manual mocks via `jest.mock()`\n"
+        "   - Service and DB layer mocks return meaningful and testable values (e.g., `mockResolvedValue()`)\n"
+        "   - `jest.fn()` is used consistently for custom mock functions\n\n"
+        "3. **Structural Quality**:\n"
+        "   - Each test is enclosed in descriptive `describe()` and `test()` or `it()` blocks\n"
+        "   - Tests must follow proper isolation using `beforeEach`, `afterEach`, or mock resets\n"
+        "   - Each test case should target a specific code unit (function, class, module)\n\n"
+        "4. **Coverage Completeness**:\n"
+        "   - Missing test cases for detected segments should be added\n"
+        "   - Must account for edge cases, invalid inputs, error handling, and async failure scenarios\n\n"
+        "5. **Formatting & Imports**:\n"
+        "   - All required imports must be valid and correctly referenced\n"
+        "   - File paths for module mocks should match segmented structure (e.g., `../../db/models/...`)\n"
+        "   - Output files follow Jest naming conventions (`*.test.js`) and reside in `__tests__` folders\n\n"
+        "6. **Output Format**:\n"
+        "   - Return a single valid JavaScript file (`corrected_test_cases.test.js`) containing all corrected test cases\n"
+        "   - Do not include explanations or surrounding commentary — only executable, corrected code\n\n"
+        "Tests must run successfully when executed using `jest --coverage` in the configured CI pipeline."
+    ),
+    agent=test_case_correction_agent,
+    context=[
+        test_case_generation_task
+    ],
+    tools=[exa_tool, docs_search_tool],
+    function_calling_llm=llm_gemma_2,
+    output_file="corrected_test_cases.test.js"
+)
+
+
+
+
+jest_config_correction_agent = Agent(
+    role="Jest Configuration Validator and Corrector",
+    goal="Analyze and correct the Jest configuration file to ensure it is fully compatible with an ES Module-based Node.js backend and the test cases it is intended to run.",
+    backstory=(
+        "You are a Jest configuration specialist with deep expertise in modern JavaScript tooling, ESModules, and transformer performance tuning. "
+        "You are responsible for ensuring that the jest.config.js file aligns with the test architecture, handles dynamic imports correctly, avoids deprecated options, "
+        "and works with SWC, mocking strategies, and file system conventions used in modern backends. "
+        "You proactively identify misconfigurations and provide corrected versions ready for CI/CD integration."
+    ),
+    llm=llm_gemini,
+    memory=True,
+    verbose=True
+)
+
+jest_config_correction_task = Task(
+    description="Review the generated `jest.config.js` file and correct any issues related to test file matching, ESM compatibility, SWC transform settings, coverage settings, or deprecated fields.",
+    expected_output="""
+A corrected and validated Jest configuration file (`jest.config.reviewed.js`) that:
+
+1. Ensures `testEnvironment: 'node'` is present and correct.
+2. Validates `transform` block uses `@swc/jest` with proper `ecmascript` parsing and ESM module output.
+3. Verifies `testMatch` patterns align with the actual structure of test files.
+4. Includes the right `moduleFileExtensions` for the backend project.
+5. Uses `moduleDirectories` and `roots` that match actual project folders (`src/`, etc.).
+6. Enables `collectCoverage: true` and sets `coverageDirectory` properly.
+7. Confirms `clearMocks: true` and `maxWorkers` settings are safe and optimized.
+8. Removes or avoids deprecated options such as `extensionsToTreatAsEsm`.
+9. Matches assumptions from `test_case_generation_task` (e.g., dynamic `await import()`, `jest.unstable_mockModule`).
+10. Returns a final, corrected config file named `jest.config.reviewed.js`.
+
+Do not include summaries or explanation—only corrected, executable config code.
+""",
+    agent=jest_config_correction_agent,
+    context=[jest_config_task, test_case_generation_task, code_segmentation_task],
+    output_file="jest.config.reviewed.js"
+)
+
+
+
+
+package_json_correction_agent = Agent(
+    role="Package.json Configuration Reviewer and Fixer",
+    goal="Analyze and correct the project's package.json file to ensure it accurately reflects the backend structure, test setup, and dev tooling required for modern ES Module-based Node.js projects using Jest.",
+    backstory=(
+        "You are a Node.js configuration and dependency expert responsible for validating and correcting package.json files. "
+        "You ensure all scripts, metadata, and dependencies align with the codebase and test environment. "
+        "You specialize in backend tooling, Jest integration, SWC transformers, mock dependencies, and ESM compatibility. "
+        "Your job is to prevent runtime issues and misconfigurations that can break test execution, development workflows, or CI pipelines."
+    ),
+    llm=llm_gemini,
+    memory=True,
+    verbose=True
+)
+
+package_json_correction_task = Task(
+    description="Review and correct the generated `package.json` file to ensure that all fields, dependencies, and scripts match the actual project structure, ESM requirements, and Jest setup.",
+    expected_output="""
+A corrected `package.json` file (`package.reviewed.json`) that includes:
+
+1. ✅ Accurate metadata:
+   - `"name"` and `"version"` are valid
+   - `"type": "module"` is included for ESM projects
+   - `"main"` points to a real file in the project (e.g., `src/server.js`)
+
+2. ✅ Complete and correct scripts:
+   - `"test"` runs `jest --coverage`
+   - `"dev"` runs the entry point using `nodemon`
+   - `"docs"` runs `jsdoc` if documentation is expected
+
+3. ✅ Dev dependencies that match the tooling:
+   - `jest` and `@swc/jest` for testing
+   - `node-mocks-http` for HTTP mocking
+   - `sequelize-mock` if Sequelize usage is detected
+   - `nodemon` and `jsdoc` if referenced in scripts
+
+4. ✅ No unnecessary or frontend packages:
+   - No React, Babel, TypeScript, Webpack, or frontend libraries unless used
+
+5. ✅ ESM and Jest compatibility:
+   - Ensures all tools in the config support ESM and are used correctly
+   - Aligns versions of tools with test and config file syntax
+
+6. ✅ Output:
+   - A fully corrected `package.json` with no comments, no trailing commas, and valid JSON syntax
+
+""",
+    agent=package_json_correction_agent,
+    context=[package_json_task, file_extraction_task, jest_config_task],
+    output_file="package.reviewed.json"
+)
+
+
+
+
+final_summary_agent = Agent(
+    role="Final Codebase Summary Auditor",
+    goal="Analyze all corrected files (test cases, jest config, package.json) and generate a markdown summary of test, configuration, and deployment readiness.",
+    backstory=(
+        "You are a senior CI/CD validator responsible for final review before deployment or merging. "
+        "You evaluate the structure, syntax, and tooling correctness of all critical files in the Node.js backend system "
+        "including the Jest config, test cases, and package configuration. "
+        "You generate a concise final report that confirms readiness or flags specific areas for human attention."
+    ),
+    llm=llm_gemini,
+    memory=True,
+    verbose=True
+)
+
+final_summary_task = Task(
+    description=(
+        "Review the final outputs: `corrected_test_cases.test.js`, `jest.config.reviewed.js`, and `package.reviewed.json`. "
+        "Evaluate them for test compatibility, config correctness, and CI/CD readiness. "
+        "Ensure all files are complete, runnable, and aligned with ESM standards. "
+        "Summarize the results in a markdown report with a CI deployment readiness checklist."
+    ),
+    expected_output="""
+A final summary report in Markdown (`final_summary.md`) that includes:
+
+## ✅ Final Test & Configuration Summary
+
+### 1. ✅ Jest Test Suite
+- [ ] All test cases are syntactically valid and pass linting
+- [ ] Sequelize models are mocked properly
+- [ ] Dynamic import usage (`await import()`) is valid
+- [ ] Test files follow `.test.js` conventions in `__tests__/`
+
+### 2. ✅ Jest Configuration
+- [ ] ESM-compatible (`type: 'module'`)
+- [ ] `@swc/jest` transform present with proper parser/module settings
+- [ ] No deprecated fields (e.g., `extensionsToTreatAsEsm`)
+- [ ] `testMatch` paths reflect segmented test structure
+
+### 3. ✅ Package.json
+- [ ] Scripts (`test`, `dev`, `docs`) are complete
+- [ ] Required `devDependencies` are present (e.g., `jest`, `@swc/jest`, mocks)
+- [ ] No unused or frontend libraries included
+- [ ] `main` file exists and is correctly linked
+
+### 4. ✅ CI/CD Readiness
+- [ ] Jest runs with `--coverage`
+- [ ] Coverage goal: ≥ 90% branches, statements, functions, lines
+- [ ] Files are named properly and safe for Git merge/deploy
+
+### 📦 Files Reviewed
+- `corrected_test_cases.test.js`
+- `jest.config.reviewed.js`
+- `package.reviewed.json`
+
+If any box cannot be checked, describe the issue in a bullet point list below:
+
+### ❌ Issues Found
+- <if any>
+
+""",
+    agent=final_summary_agent,
+    context=[
+        test_case_correction_task,
+        jest_config_correction_task,
+        package_json_correction_task
+    ],
+    output_file="final_summary.md"
+)
+
+
+
+
+
+#Testing the Agents
+testing_crew = Crew(
+    agents=[
+        directory_listing_agent,
+        file_extraction_agent,
+        code_segmentation_agent,
+        test_case_generator,
+        jest_config_agent,
+        package_json_agent,
+        test_case_correction_agent,
+        jest_config_correction_agent,      
+        package_json_correction_agent,
+        final_summary_agent     
+    ],
+    tasks=[
+        directory_listing_task,
+        file_extraction_task,
+        code_segmentation_task,
+        test_case_generation_task,
+        jest_config_task,
+        package_json_task,
+        test_case_correction_task,
+        jest_config_correction_task,       
+        package_json_correction_task,
+        final_summary_task       
+    ],
     process=Process.sequential
 )
+
 testing_crew.kickoff()
